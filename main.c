@@ -1,19 +1,30 @@
-#include <fcntl.h>
+/*! \mainpage Drive Car
+ *
+ * \section intro_sec Introduction
+ *
+ * This project aims to drive a car from a Linux pc using a game controller.\n
+ * For communication with the car interfaces, a comma.ai Panda is used.\n
+ * The comma.ai Panda is talked to via USB and the libusb. \n
+ *
+ * \section build_sec Build
+ *
+ * To build this project, you can just run\n
+ * ```make```\n\n
+ * To clean all the build files and the compiled software, run\n
+ * ```make clean```\n
+ */
+
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-
 #include <unistd.h>
-#include <errno.h>
-#include <string.h>
 #include <signal.h>
 
 #include <sys/ioctl.h>
 #include <sys/time.h>
 
-#include <linux/joystick.h>
-#include <libusb-1.0/libusb.h>
-
+#include "panda.h"
+#include "joystick.h"
 
 #define ARRAY_LENGTH(arr)  (sizeof(arr) / sizeof((arr)[0]))
 
@@ -23,20 +34,6 @@ typedef struct {
     uint8_t enableCam;
 } Params;
 
-typedef struct {
-    int16_t x;
-    int16_t y;
-} axisState;
-
-typedef struct {
-    const char *name;
-    int fd;
-    axisState axes[3];
-    uint8_t buttons[12];
-    uint8_t numberOfAxes;
-    uint8_t numberOfButtons;
-} Joystick;
-
 typedef struct timeval Time;
 
 typedef struct {
@@ -44,39 +41,8 @@ typedef struct {
     float angle;
 } CARState;
 
-typedef struct {
-    libusb_device_handle *handle;
-    struct libusb_device_descriptor desc;
-} Panda;
-
-typedef struct {
-    uint16_t ID;
-    uint8_t data[8];
-    uint8_t bus;
-    uint8_t length;
-    uint8_t freq;
-} CANFrame;
-
 #define terminalColor(color) printf("\033[%dm", color)
 
-
-const int REQUEST_IN  = LIBUSB_ENDPOINT_IN  | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE;
-const int REQUEST_OUT = LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE;
-
-int panda_setup(Panda *p);
-int panda_connect(Panda *p);
-int panda_close(Panda *p);
-
-int panda_get_version(Panda *p);
-int panda_set_safety_mode(Panda *p, uint16_t mode);
-int panda_set_can_speed(Panda *p, int bus, int speed);
-
-int panda_can_send_many(Panda *p, CANFrame frames[], int length);
-int panda_can_send(Panda *p, CANFrame frame);
-int panda_can_recv(Panda *p, unsigned char *data, int length);
-int panda_can_clear(Panda *p, int bus);
-
-void print_many(CANFrame frames[], int length);
 
 int getParams(int argc, char *argv[], Params *params) {
     if(argc <= 1) {
@@ -97,78 +63,6 @@ int getParams(int argc, char *argv[], Params *params) {
         getParams(0, argv, NULL);
 
     return 0;
-}
-
-int setupJoystick(Joystick *js, char *name) {
-    memset(js->axes, 0, 3 * sizeof(axisState));
-    memset(js->buttons, 0, 12 * sizeof(uint8_t));
-
-    js->name = name;
-    js->fd = open(js->name, O_RDONLY | O_NONBLOCK);
-    if(js->fd == -1) {
-        terminalColor(31);
-        printf("Could not open joystick\n");
-        terminalColor(0);
-        return -1;
-    }
-
-    if(ioctl(js->fd, JSIOCGAXES, &js->numberOfAxes) == -1)
-        js->numberOfAxes = 0;
-
-    if(ioctl(js->fd, JSIOCGBUTTONS, &js->numberOfButtons) == -1)
-        js->numberOfButtons = 0;
-
-    terminalColor(32);
-    printf("Joystick connected\n");
-    terminalColor(0);
-    fflush(stdout);
-
-    return 0;
-}
-void readJoystick(Joystick *js) {
-    struct js_event event;
-    uint8_t axis;
-
-    if(read(js->fd, &event, sizeof(event)) > 0) {
-        switch(event.type) {
-            case JS_EVENT_BUTTON:
-                js->buttons[event.number] = event.value;
-                break;
-            case JS_EVENT_AXIS:
-                axis = event.number / 2;
-
-                if(axis < 3) {
-                    if(event.number % 2 == 0)
-                        js->axes[axis].x = event.value;
-                    else
-                        js->axes[axis].y = event.value;
-                }
-                break;
-            default:
-                /* Ignore init events. */
-                break;
-        }
-    }
-
-    if(errno != EAGAIN && errno != 0) {
-        terminalColor(31);
-        printf("%d\n", errno);
-        terminalColor(0);
-        exit(1);
-    }
-}
-void printState(Joystick *js, int enableAxes, int enableButtons) {
-    if(enableAxes)
-        for(uint8_t i = 0; i < js->numberOfAxes / 2; i++) {
-            printf("X%d: %6d Y%d: %6d ", i, js->axes[i].x, i, js->axes[i].y);
-        }
-    if(enableButtons)
-        for(uint8_t i = 0; i < js->numberOfButtons; i++) {
-            printf("B%d: %d ", i, js->buttons[i]);
-        }
-
-    printf("\r");
-    fflush(stdout);
 }
 
 uint16_t create_checksum(CANFrame *frame) {
@@ -458,197 +352,5 @@ int main(int argc, char *argv[]) {
         terminalColor(0);
     }
     if(p.handle != 0) panda_close(&p);
-    return 0;
-}
-
-void print_many(CANFrame frames[], int length) {
-    for(int k = 0; k < length; k++) {
-        printf("Bus: %d  ID: %4d  Length: %d  Data: ", frames[k].bus, frames[k].ID, frames[k].length);
-        for(int l = 0; l < frames[k].length; l++) {
-            printf("%02X ", frames[k].data[l]);
-        }
-        printf("\n");
-    }
-}
-
-
-int panda_setup(Panda *p) {
-    p->handle = 0;
-    int ret;
-
-    ret = libusb_init(NULL);
-
-    if(ret < 0) {
-        terminalColor(31);
-        printf("Unable to Init\n");
-        terminalColor(0);
-        return ret;
-    }
-
-    ret = panda_connect(p);
-
-    if(ret < 0) {
-        terminalColor(31);
-        printf("Unable to connect\n");
-        terminalColor(0);
-        return ret;
-    }
-
-    panda_set_safety_mode(p, 0x1337);
-
-    return 0;
-}
-
-int panda_connect(Panda *p) {
-    libusb_device **devices;
-    ssize_t cnt;
-    int ret;
-
-    if(p->handle != 0)
-        panda_close(p);
-
-    cnt = libusb_get_device_list(NULL, &devices);
-    if(cnt < 0) {
-        terminalColor(31);
-        printf("No devices\n");
-        terminalColor(0);
-        return (int)cnt;
-    }
-
-    for(int i = 0; devices[i]; ++i) {
-        ret = libusb_get_device_descriptor(devices[i], &(p->desc));
-        if(ret < 0) {
-            terminalColor(31);
-            printf("Failed to get descriptor\n");
-            terminalColor(0);
-            return ret;
-        }
-
-        //printf("%d %04x %04x\n", i, p->desc.idVendor, p->desc.idProduct);
-        if(p->desc.idVendor == 0xbbaa && (p->desc.idProduct == 0xddcc || p->desc.idProduct == 0xddee)) {
-            ret = libusb_open(devices[i], &(p->handle));
-            if(ret < 0) {
-                terminalColor(31);
-                printf("Couldn't open device\n");
-                terminalColor(0);
-                return ret;
-            }
-
-            ret = libusb_set_configuration(p->handle, 1);
-            if(ret < 0) {
-                terminalColor(31);
-                printf("%d: Couldn't set configuration\n", ret);
-                terminalColor(0);
-                return ret;
-            }
-
-            ret = libusb_claim_interface(p->handle, 0);
-            if(ret < 0) {
-                terminalColor(31);
-                printf("%d: Couldn't claim interface\n", ret);
-                terminalColor(0);
-                return ret;
-            }
-
-            libusb_control_transfer(p->handle, 0xc0, 0xd9, 0, 0, NULL, 0, 0);
-
-            break;
-        }
-    }
-
-    if(p->handle == 0) {
-        terminalColor(31);
-        printf("No Panda found.\n");
-        terminalColor(0);
-        return -1;
-    }
-    terminalColor(32);
-    printf("Panda connected\n");
-    terminalColor(0);
-    fflush(stdout);
-
-    return 0;
-}
-
-int panda_close(Panda *p) {
-    libusb_close(p->handle);
-    p->handle = 0;
-    terminalColor(32);
-    printf("Closed Panda\n");
-    terminalColor(0);
-
-    return 0;
-}
-
-int panda_set_safety_mode(Panda *p, uint16_t mode) {
-    return libusb_control_transfer(p->handle, REQUEST_OUT, 0xdc, mode, 0, NULL, 0, 0);
-}
-
-int panda_set_can_speed(Panda *p, int bus, int speed) {
-    unsigned char data[1];
-    return libusb_control_transfer(p->handle, REQUEST_OUT, 0xde, bus, speed*10, data, 0, 0);
-}
-
-int panda_can_send_many(Panda *p, CANFrame frames[], int length) {
-    int nrBytes = 16  * length;
-    unsigned char *data = calloc(nrBytes, sizeof(unsigned char));
-    unsigned char *tempData = data;
-    int transferred;
-    int ret;
-
-    for(int i = 0; i < length; i++) {
-        tempData[0] = (frames[i].ID >> 3) & 0xFF;
-        tempData[1] = (frames[i].ID << 5) & 0xFF;
-        tempData[3] = 1;
-        tempData[7] = frames[i].length | (frames[i].bus << 4);
-
-        tempData += 8;
-        for(int j = 0; j < frames[i].length; j++) {
-            tempData[j] = frames[i].data[j];
-        }
-
-        tempData += 8;
-    }
-
-    ret = libusb_bulk_transfer(p->handle, 3 | LIBUSB_ENDPOINT_OUT, data, nrBytes, &transferred, 0);
-    free(data);
-
-    if(ret < 0) {
-        return ret;
-    }
-
-    return 0;
-}
-
-int panda_can_send(Panda *p, CANFrame frame) {
-    return panda_can_send_many(p, &frame, 1);
-}
-
-int panda_can_recv(Panda *p, unsigned char *data, int length) {
-    int transferred;
-    int ret;
-    ret = libusb_bulk_transfer(p->handle, 1 | LIBUSB_ENDPOINT_IN, data, length, &transferred, 0);
-    if(ret < 0) {
-        return ret;
-    }
-
-    return transferred;
-}
-
-int panda_can_clear(Panda *p, int bus) {
-    unsigned char data[1];
-    return libusb_control_transfer(p->handle, REQUEST_OUT, 0xf1, bus, 0, data, 0, 0);
-}
-
-int panda_get_version(Panda *p) {
-    unsigned char data[0x40] = {0};
-    int ret;
-    ret = libusb_control_transfer(p->handle, REQUEST_IN, 0xd6, 0, 0, data, 0x40, 0);
-    if(ret < 0) {
-        return ret;
-    }
-
-    printf("%s\n", data);
-
     return 0;
 }
