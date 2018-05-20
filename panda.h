@@ -35,6 +35,16 @@
 	    uint8_t freq;	//!< How frequent to send the frame. 
 	} CANFrame;
 
+        typedef struct {
+            uint32_t voltage;
+            uint32_t current;
+            uint8_t started;
+            uint8_t controls_allowed;
+            uint8_t gas_interceptor_detected;
+            uint8_t started_signal_detected;
+            uint8_t started_alt;
+        } health;
+
 
 	/**
 	 * \brief Constant to define what type of request you want to make.
@@ -54,6 +64,7 @@
 	 * \fn int panda_setup(Panda *p)
 	 * \brief Setup and connect to the Panda
 	 * \param p Pointer to Panda struct.
+         * \param mode Safety Mode
 	 * \return 0 Success
 	 * \return < 0 Fail
 	 * 
@@ -127,13 +138,14 @@
 	 * \return 0 Success
 	 * \return < 0 Problem
 	 */
-	int panda_setup(Panda *p);
+        int panda_setup(Panda *p, int mode);
 	int panda_connect(Panda *p);
 	int panda_close(Panda *p);
 
 	int panda_get_version(Panda *p);
 	int panda_set_safety_mode(Panda *p, uint16_t mode);
 	int panda_set_can_speed(Panda *p, int bus, int speed);
+        int panda_get_health(Panda *p, health *h);
 
 	int panda_can_send_many(Panda *p, CANFrame frames[], int length);
 	int panda_can_send(Panda *p, CANFrame frame);

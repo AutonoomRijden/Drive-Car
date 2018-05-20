@@ -188,14 +188,14 @@ int sendSteerCommand(CANFrame frames[], uint16_t count, uint16_t torque) {
 
     return 1;
 }
-int sendAccelCommand(CANFrame frames[], uint16_t count, uint16_t acceleration) {
-    if(count % 3 == 0) {
+int sendAccelCommand(CANFrame frames[], uint16_t count, uint16_t acceleration, uint8_t cancel) {
+    if(count % 3 == 0 || cancel) {
         frames[0].ID = 0x343;
         frames[0].length = 8;
         frames[0].data[0] = acceleration >> 8;
         frames[0].data[1] = acceleration & 0xFF;
         frames[0].data[2] = 0x63;
-        frames[0].data[3] = 0xC0;
+        frames[0].data[3] = 0xC0 + cancel;
         frames[0].data[4] = 0x00;
         frames[0].data[5] = 0x00;
         frames[0].data[6] = 0x00;
@@ -289,13 +289,30 @@ int main(int argc, char *argv[]) {
 
     Params params;
 
+    health h;
+
     ret = getParams(argc, argv, &params);
     if(ret < 0) goto end;
-    ret = panda_setup(&p);
+    ret = panda_setup(&p, 0x1336);
     if(ret < 0) goto end;
     ret = setupJoystick(&js, params.js);
     if(ret < 0) goto end;
     gettimeofday(&prev_time, NULL);
+
+    panda_get_health(&p, &h);
+    printf("V:%d  Started:%d  Controls:%d\n", h.voltage, h.started, h.controls_allowed);
+/*    unsigned char data[0x10 * 256] = { 0 };
+    uint32_t *tempData = (uint32_t*)data;
+    int length;
+
+    uint32_t ID;
+    uint8_t data_length;
+    uint8_t bus;
+*/
+    int16_t steer;
+    int16_t steer_count;
+    int16_t accel = 0;
+    int16_t decel = 0;
 
     while(running) {
         gettimeofday(&time, NULL);
@@ -304,13 +321,46 @@ int main(int argc, char *argv[]) {
         //analyzeCANFrame(frame, &state);
 
         readJoystick(&js);
+/*        length = panda_can_recv(&p, data, 0x10 * 256);
+
+        if(length < 0) {
+            printf("Read fault\n");
+            break;
+        }
+
+        length = length / 0x10;
+
+        if(length > 0) {
+            ID = tempData[0] >> 21;
+            data_length = tempData[1] & 0x0F;
+            bus = (tempData[1] >> 4) & 0x0F;
+
+            if(ID == 0x2E4 && bus == 0) {
+                printf("length: %d\tID: %03X  DLC: %d  Data: ", length, ID, data_length);
+                for(int j = 0; j < data_length; j++) {
+                    printf("%02X ", data[8 + j]);
+                }
+                printf("\n");
+            }            
+        }
+*/
+
         // 100 Hz
         if((time.tv_usec + ((time.tv_sec - prev_time.tv_sec) * 1000000)) >= (prev_time.tv_usec + 10000)) {
             //printState(&js, 1, 0);
 
             if(params.enableCam) {
-                //list_length += sendSteerCommand(frame_list, count, js.axes[0].x/10);           // Cam
-                list_length += sendSteerCommand(frame_list, count, 0);           // Cam
+                steer = (js.axes[0].x * (-1))/22;
+                //steer = (steer > 1500) ? 1500 : ((steer < -1500) ? -1500 : steer);
+                if(steer > (steer_count + 30))
+                    steer_count += 30;
+                if(steer < (steer_count - 30))
+                    steer_count -= 30;
+
+                if(steer == 0)
+                    steer_count = 0;
+
+                list_length += sendSteerCommand(frame_list, count, steer_count);               // Cam
 
                 list_length += sendStaticVideo(frame_list + list_length, count);               // Cam
                 list_length += sendStaticCam(frame_list + list_length, count);                 // Cam
@@ -320,8 +370,12 @@ int main(int argc, char *argv[]) {
             }
 
             if(params.enableDsu) {
-                //list_length += sendAccelCommand(frame_list + list_length, count, (js.axes[0].y * -1)/10);    // Dsu
-                list_length += sendAccelCommand(frame_list + list_length, count, 0);    // Dsu
+                accel = (js.buttons[1] * !js.buttons[2] * (accel + 10));
+                decel = (js.buttons[2] * (decel - 20));
+
+                accel = (accel > 1500) ? 1500 : accel;
+                decel = (decel < -3000) ? -3000 : decel;
+                list_length += sendAccelCommand(frame_list + list_length, count, accel + decel, js.buttons[3]);  // Dsu
                 list_length += sendStaticDsu(frame_list + list_length, count);                               // Dsu
             }
 

@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <libusb-1.0/libusb.h>
 
@@ -7,7 +8,7 @@
 
 #define terminalColor(color) printf("\033[%dm", color)
 
-int panda_setup(Panda *p) {
+int panda_setup(Panda *p, int mode) {
     p->handle = 0;
     int ret;
 
@@ -29,7 +30,7 @@ int panda_setup(Panda *p) {
         return ret;
     }
 
-    panda_set_safety_mode(p, 0x1337);
+    panda_set_safety_mode(p, mode);
 
     return 0;
 }
@@ -129,7 +130,7 @@ int panda_get_version(Panda *p) {
 }
 
 int panda_set_safety_mode(Panda *p, uint16_t mode) {
-    return libusb_control_transfer(p->handle, REQUEST_OUT, 0xdc, mode, 0, NULL, 0, 0);
+    return libusb_control_transfer(p->handle, REQUEST_OUT, 0xdc, mode, 73, NULL, 0, 0);
 }
 
 int panda_set_can_speed(Panda *p, int bus, int speed) {
@@ -137,25 +138,24 @@ int panda_set_can_speed(Panda *p, int bus, int speed) {
     return libusb_control_transfer(p->handle, REQUEST_OUT, 0xde, bus, speed*10, data, 0, 0);
 }
 
+int panda_get_health(Panda *p, health *h) {
+    return libusb_control_transfer(p->handle, 0xc0, 0xd2, 0, 0, (unsigned char*)h, sizeof(health), 0);
+}
+
 int panda_can_send_many(Panda *p, CANFrame frames[], int length) {
-    int nrBytes = 16  * length;
+    int nrBytes = 0x10  * length;
     unsigned char *data = calloc(nrBytes, sizeof(unsigned char));
-    unsigned char *tempData = data;
+    uint32_t *tempData = (uint32_t*)data;
     int transferred;
     int ret;
 
     for(int i = 0; i < length; i++) {
-        tempData[0] = (frames[i].ID >> 3) & 0xFF;
-        tempData[1] = (frames[i].ID << 5) & 0xFF;
-        tempData[3] = 1;
-        tempData[7] = frames[i].length | (frames[i].bus << 4);
+        tempData[0] = (frames[i].ID << 21) | 1;
+        tempData[1] = frames[i].length | (frames[i].bus << 4);
 
-        tempData += 8;
-        for(int j = 0; j < frames[i].length; j++) {
-            tempData[j] = frames[i].data[j];
-        }
+        memcpy(&tempData[2], frames[i].data, frames[i].length);
 
-        tempData += 8;
+        tempData += 4;
     }
 
     ret = libusb_bulk_transfer(p->handle, 3 | LIBUSB_ENDPOINT_OUT, data, nrBytes, &transferred, 0);
