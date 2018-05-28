@@ -12,7 +12,7 @@
 #define terminalColor(color) printf("\033[%dm", color)
 
 int setupJoystick(Joystick *js, char *name) {
-    memset(js->axes, 0, 3 * sizeof(axisState));
+    memset(js->axes, 0, 3 * sizeof(Axis));
     memset(js->buttons, 0, 12 * sizeof(uint8_t));
 
     js->name = name;

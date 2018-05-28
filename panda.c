@@ -138,8 +138,8 @@ int panda_set_can_speed(Panda *p, int bus, int speed) {
     return libusb_control_transfer(p->handle, REQUEST_OUT, 0xde, bus, speed*10, data, 0, 0);
 }
 
-int panda_get_health(Panda *p, health *h) {
-    return libusb_control_transfer(p->handle, 0xc0, 0xd2, 0, 0, (unsigned char*)h, sizeof(health), 0);
+int panda_get_health(Panda *p, Health *h) {
+    return libusb_control_transfer(p->handle, 0xc0, 0xd2, 0, 0, (unsigned char*)h, sizeof(Health), 0);
 }
 
 int panda_can_send_many(Panda *p, CANFrame frames[], int length) {
