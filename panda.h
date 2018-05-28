@@ -67,7 +67,7 @@
 	#define REQUEST_OUT (LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE)
 
 	/**
-	 * \fn int panda_setup(Panda *p)
+         * \fn int panda_setup(Panda *p, int mode)
 	 * \brief Setup and connect to the Panda
 	 * \param p Pointer to Panda struct.
          * \param mode Safety Mode
@@ -107,6 +107,13 @@
          * \return 0: Success
          * \return <0: Fail
 	 * 
+         * \fn int panda_get_health(Panda *p, Health *h)
+         * \brief Get the car health from the Panda
+         * \param p Pointer to Panda struct
+         * \param h Struct to store the read data.
+         * \return 0: Success
+         * \return <0: Fail
+         *
 	 * \fn int panda_can_send_many(Panda *p, CANFrame frames[], int length)
 	 * \brief Send many CAN frames to the Panda
 	 * \param p Pointer to Panda struct.
